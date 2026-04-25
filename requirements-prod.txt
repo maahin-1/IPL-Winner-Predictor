@@ -1,0 +1,21 @@
+# Production infrastructure — not needed for local simulation
+# Install on top of requirements.txt when deploying to cloud
+
+# Feature Store
+feast>=0.38.0
+redis>=5.0.0
+
+# Pipeline / Streaming
+kafka-python>=2.0.2
+apache-airflow>=2.9.0
+
+# Scraping
+scrapy>=2.11.0
+playwright>=1.43.0
+
+# Model Serving
+bentoml>=1.2.0
+
+# Monitoring
+evidently>=0.4.0
+mlflow>=2.12.0

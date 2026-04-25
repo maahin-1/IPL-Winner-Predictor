@@ -1,0 +1,987 @@
+{
+  "meta": {
+    "document_type": "PRD",
+    "product_name": "IPL Predictive Intelligence Engine",
+    "acronym": "IPIE",
+    "version": "1.0",
+    "date": "April 2026",
+    "author": "Maahin — CombatIQ / FlowerCookie Ventures",
+    "primary_use_case": "Fantasy Sports Platform Integration",
+    "status": "ACTIVE",
+    "schema_version": "ipie-prd-v1"
+  },
+  "prediction_targets": [
+    {
+      "id": "PT-001",
+      "name": "match_winner",
+      "description": "Live and pre-match winner prediction for each IPL game",
+      "timing": [
+        "pre_match",
+        "live"
+      ],
+      "refresh_cadence": "every_over"
+    },
+    {
+      "id": "PT-002",
+      "name": "season_winner",
+      "description": "Probability of each franchise winning the IPL trophy",
+      "timing": [
+        "pre_season",
+        "pre_match"
+      ],
+      "refresh_cadence": "daily"
+    },
+    {
+      "id": "PT-003",
+      "name": "playoff_qualifier",
+      "description": "Probability of each team reaching the top 4",
+      "timing": [
+        "pre_season",
+        "rolling"
+      ],
+      "refresh_cadence": "post_match"
+    }
+  ],
+  "goals": {
+    "strategic": [
+      {
+        "id": "G1",
+        "statement": "Deliver over-by-over win probability updates with <30s latency from ball completion to API response"
+      },
+      {
+        "id": "G2",
+        "statement": "Model every player-coach-venue dimension that correlates with match outcomes"
+      },
+      {
+        "id": "G3",
+        "statement": "Expose LLM-generated reasoning narratives alongside probability scores for fantasy UX integration"
+      },
+      {
+        "id": "G4",
+        "statement": "Maintain >72% prediction accuracy across a full IPL season on held-out test matches"
+      },
+      {
+        "id": "G5",
+        "statement": "Build a modular, cloud-agnostic architecture ready to scale to BBL, SA20, ILT20"
+      }
+    ],
+    "non_goals_v1": [
+      "Ball-by-ball prediction (planned v2.0)",
+      "Player auction valuation or team composition advisor",
+      "Betting market integration",
+      "Non-T20 format support (ODI, Test)"
+    ]
+  },
+  "data_sources": [
+    {
+      "tier": "T1",
+      "name": "CricSheet",
+      "type": "historical_csv",
+      "description": "Ball-by-ball historical data for all IPL seasons",
+      "coverage": "2008–2025 all IPL matches",
+      "refresh": "one_time_plus_seasonal",
+      "format": "CSV",
+      "url": "https://cricsheet.org/downloads/",
+      "priority": "CRITICAL",
+      "notes": "Foundation for all model training. Download all IPL match YAMLs and parse to tabular."
+    },
+    {
+      "tier": "T2",
+      "name": "Cricbuzz API",
+      "type": "live_api",
+      "description": "Live match data, ball-by-ball commentary stream, scorecards",
+      "coverage": "Current season, live match state",
+      "refresh": "real_time",
+      "priority": "CRITICAL",
+      "notes": "Primary live data feed. Requires paid API key. Has rate limits — implement exponential backoff."
+    },
+    {
+      "tier": "T3",
+      "name": "ESPNcricinfo API",
+      "type": "historical_and_live",
+      "description": "Player profiles, career statistics, match summaries",
+      "coverage": "Historical + current season",
+      "refresh": "daily",
+      "priority": "HIGH",
+      "notes": "Use for player biographical features and career aggregates. Supplement with CricSheet."
+    },
+    {
+      "tier": "T4",
+      "name": "Official IPL Feed",
+      "type": "official_partner",
+      "description": "Squad announcements, playing XI, toss results, injury updates",
+      "coverage": "Current season only",
+      "refresh": "pre_match_and_live",
+      "priority": "HIGH",
+      "notes": "Most reliable source for playing XI and toss. Pursue official BCCI/IPL data partnership."
+    },
+    {
+      "tier": "T5",
+      "name": "Custom Scraper",
+      "type": "web_scraper",
+      "description": "Coach win records, auction prices, venue condition reports, team news",
+      "coverage": "Multi-source, best effort",
+      "refresh": "weekly_or_seasonal",
+      "priority": "MEDIUM",
+      "notes": "Use Scrapy or Playwright. Target: HowStat, CricketArchive, franchise press releases. Respect robots.txt."
+    }
+  ],
+  "feature_store": {
+    "technology": "Feast",
+    "backend": "Redis (online) + BigQuery or S3 (offline)",
+    "key_principle": "point_in_time_correctness",
+    "anti_pattern": "NO future data leakage — all features must be available at prediction time",
+    "feature_groups": {
+      "batsman": [
+        {
+          "name": "batting_avg_recent",
+          "description": "Batting average over last N matches",
+          "windows": [
+            "last_5",
+            "last_10",
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "strike_rate_venue",
+          "description": "Strike rate at the specific match venue",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "strike_rate_vs_bowler_type",
+          "description": "SR vs pace / spin / swing bowling",
+          "windows": [
+            "career",
+            "last_2_seasons"
+          ],
+          "dtype": "dict"
+        },
+        {
+          "name": "powerplay_contribution",
+          "description": "Runs and balls faced in overs 1-6",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "death_overs_sr",
+          "description": "Strike rate in overs 17-20",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "boundary_pct",
+          "description": "Percentage of runs scored via fours and sixes",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "chase_avg",
+          "description": "Batting average when team is chasing",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "pressure_index",
+          "description": "Performance when team RRR exceeds 10",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "h2h_avg_vs_team",
+          "description": "Average runs against the specific opponent",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "form_momentum",
+          "description": "Exponentially weighted recency score",
+          "windows": [
+            "last_5_innings"
+          ],
+          "dtype": "float"
+        }
+      ],
+      "bowler": [
+        {
+          "name": "economy_rate_recent",
+          "description": "Economy rate over last N matches",
+          "windows": [
+            "last_5",
+            "last_10",
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "wicket_prob_by_phase",
+          "description": "Wicket probability in powerplay / middle / death overs",
+          "windows": [
+            "season"
+          ],
+          "dtype": "dict"
+        },
+        {
+          "name": "dot_ball_pct",
+          "description": "Percentage of deliveries resulting in dot balls",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "bowling_at_venue",
+          "description": "Economy and wicket rate at specific venue",
+          "windows": [
+            "career"
+          ],
+          "dtype": "dict"
+        },
+        {
+          "name": "vs_batsman_type",
+          "description": "Economy vs left-hand and right-hand batsmen",
+          "windows": [
+            "career"
+          ],
+          "dtype": "dict"
+        },
+        {
+          "name": "death_specialist_score",
+          "description": "Composite: economy + wickets in overs 17-20",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "pressure_wicket_rate",
+          "description": "Wickets taken when team urgently needs breakthrough",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "h2h_wickets_vs_team",
+          "description": "Total wickets taken against specific opponent",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        }
+      ],
+      "fielding_and_drs": [
+        {
+          "name": "catch_success_rate",
+          "description": "Catches taken divided by chances created",
+          "windows": [
+            "season",
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "drs_success_rate_team",
+          "description": "Team DRS review conversion rate",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "drop_catch_impact",
+          "description": "Runs scored after a dropped catch event",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "run_out_contribution",
+          "description": "Direct and indirect run-outs per match",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "boundary_save_rate",
+          "description": "Boundary prevention index from outfield",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        }
+      ],
+      "coach_and_management": [
+        {
+          "name": "coach_win_rate",
+          "description": "Overall IPL win percentage under current coach",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "coach_chase_win_rate",
+          "description": "Win percentage when chasing under current coach",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "coach_death_bowling_economy",
+          "description": "Team average death economy under current coach",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "team_strategy_fingerprint",
+          "description": "Aggression index: early vs late powerplay usage ratio",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "lineup_stability_score",
+          "description": "Consistency of playing XI selection across matches",
+          "windows": [
+            "season"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "coaching_change_impact",
+          "description": "Win rate delta since coaching change appointment",
+          "windows": [
+            "since_appointment"
+          ],
+          "dtype": "float"
+        }
+      ],
+      "venue_and_context": [
+        {
+          "name": "venue_avg_first_innings",
+          "description": "Average first innings score at venue",
+          "windows": [
+            "last_3_seasons"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "venue_chase_win_pct",
+          "description": "Win percentage when chasing at venue",
+          "windows": [
+            "last_3_seasons"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "pitch_type",
+          "description": "Categorical: seam_friendly / spin_friendly / batting_paradise",
+          "windows": [
+            "current_season"
+          ],
+          "dtype": "categorical"
+        },
+        {
+          "name": "dew_factor_flag",
+          "description": "Binary flag for historical dew impact in evening games",
+          "windows": [
+            "last_3_seasons"
+          ],
+          "dtype": "binary"
+        },
+        {
+          "name": "toss_win_advantage",
+          "description": "Win percentage for toss winner at this specific venue",
+          "windows": [
+            "career"
+          ],
+          "dtype": "float"
+        },
+        {
+          "name": "h2h_venue_record",
+          "description": "Head-to-head record between two teams at this venue",
+          "windows": [
+            "career"
+          ],
+          "dtype": "dict"
+        }
+      ]
+    }
+  },
+  "model_architecture": {
+    "stack_name": "3-Layer Intelligence Stack",
+    "layers": [
+      {
+        "id": "L1",
+        "name": "Base Ensemble",
+        "latency_budget_ms": 80,
+        "models": [
+          {
+            "id": "MODEL-A",
+            "name": "PreMatchXGB",
+            "algorithm": "XGBoost",
+            "purpose": "Pre-match win probability",
+            "timing": "pre_match",
+            "input_features": [
+              "squad_strength_index",
+              "venue_history",
+              "h2h_record",
+              "team_form_last_5",
+              "coach_win_rate",
+              "toss_outcome",
+              "season_trajectory"
+            ],
+            "output": "win_probability_pre_match",
+            "training_data": "CricSheet IPL 2008-2021",
+            "hyperparams": {
+              "n_estimators": 800,
+              "max_depth": 6,
+              "learning_rate": 0.05,
+              "subsample": 0.8,
+              "colsample_bytree": 0.8
+            }
+          },
+          {
+            "id": "MODEL-B",
+            "name": "InMatchLGB",
+            "algorithm": "LightGBM",
+            "purpose": "Live over-by-over win probability",
+            "timing": "live",
+            "input_features": [
+              "current_score",
+              "wickets_fallen",
+              "run_rate_required",
+              "over_number",
+              "bowling_phase",
+              "batsman_at_crease_features",
+              "bowler_current_form",
+              "matchup_h2h"
+            ],
+            "output": "win_probability_live",
+            "training_data": "CricSheet ball-by-ball IPL 2008-2021",
+            "hyperparams": {
+              "n_estimators": 1000,
+              "num_leaves": 63,
+              "learning_rate": 0.03,
+              "feature_fraction": 0.8,
+              "bagging_fraction": 0.8
+            }
+          },
+          {
+            "id": "MODEL-C",
+            "name": "PlayerImpactXGB",
+            "algorithm": "XGBoost",
+            "purpose": "Per-player in-match impact score (0-100)",
+            "timing": "live",
+            "input_features": [
+              "batsman_form_momentum",
+              "bowler_threat_index",
+              "fielding_contribution",
+              "matchup_advantage",
+              "phase_of_play",
+              "pressure_index"
+            ],
+            "output": "player_impact_score",
+            "training_data": "CricSheet + ESPNcricinfo player match aggregates 2015-2024"
+          },
+          {
+            "id": "MODEL-D",
+            "name": "SeasonTrajLGB",
+            "algorithm": "LightGBM",
+            "purpose": "Season winner and playoff qualifier probability",
+            "timing": "rolling_post_match",
+            "input_features": [
+              "points_table_state",
+              "net_run_rate",
+              "remaining_fixtures_difficulty",
+              "player_availability",
+              "team_momentum_score",
+              "coach_strategy_fingerprint"
+            ],
+            "output": [
+              "season_winner_probability",
+              "playoff_qualification_probability"
+            ],
+            "training_data": "IPL 2012-2024 season-level progression data"
+          }
+        ]
+      },
+      {
+        "id": "L2",
+        "name": "Meta-Learner",
+        "algorithm": "XGBoost",
+        "latency_budget_ms": 20,
+        "purpose": "Stack generalisation across base models",
+        "input": [
+          "MODEL-A.output",
+          "MODEL-B.output",
+          "MODEL-C.output",
+          "MODEL-D.output",
+          "match_phase",
+          "venue_dew_flag",
+          "team_strategy_fingerprint"
+        ],
+        "output": "calibrated_win_probability",
+        "training_strategy": "5-fold stacked cross-validation",
+        "held_out_test_set": "IPL 2024",
+        "online_learning": "Fine-tune weights after every 10 live matches"
+      },
+      {
+        "id": "L3",
+        "name": "LLM Reasoning Layer",
+        "model": "claude-sonnet-4-20250514",
+        "provider": "Anthropic",
+        "latency_budget_ms": 8000,
+        "purpose": "Narrative generation and confidence calibration",
+        "call_strategy": {
+          "trigger": "per_over",
+          "max_calls_per_over_per_match": 2,
+          "timeout_ms": 30000,
+          "fallback": "serve_ml_output_only_with_SYSTEM_FALLBACK_tag"
+        },
+        "input_format": "structured_json",
+        "output_format": "structured_json",
+        "outputs": [
+          "llm_narrative",
+          "confidence_tag",
+          "key_risk_flag",
+          "fantasy_captain_pick"
+        ],
+        "prompt_strategy": "stateless_per_over",
+        "cost_optimisation_notes": "Cache similar match-state prompts. Consider Claude Haiku for low-stakes overs (difference < 5% from previous over)."
+      }
+    ],
+    "training_split": {
+      "train": {
+        "pct": 70,
+        "seasons": "IPL 2008-2021"
+      },
+      "validation": {
+        "pct": 15,
+        "seasons": "IPL 2022-2023"
+      },
+      "test": {
+        "pct": 15,
+        "seasons": "IPL 2024"
+      },
+      "live_eval": {
+        "seasons": "IPL 2025 onwards"
+      }
+    },
+    "retraining_triggers": [
+      {
+        "trigger": "post_ipl_season",
+        "action": "Full retrain all base models + meta-learner"
+      },
+      {
+        "trigger": "rolling_accuracy_below_65pct_in_10_match_window",
+        "action": "Automated fine-tune meta-learner weights"
+      },
+      {
+        "trigger": "new_player_mid_season",
+        "action": "Update player feature vectors only; no full retrain"
+      },
+      {
+        "trigger": "venue_pitch_report_change",
+        "action": "Refresh venue features; inject inference-time override"
+      }
+    ]
+  },
+  "system_architecture": {
+    "pipeline_steps": [
+      {
+        "step": 1,
+        "component": "DataIngestor",
+        "action": "CricSheet + Cricbuzz + IPL Feed → raw event stream",
+        "tech": "Apache Kafka / Pub-Sub"
+      },
+      {
+        "step": 2,
+        "component": "FeaturePipeline",
+        "action": "Transform raw events into feature vectors",
+        "tech": "Apache Spark + dbt + Feast"
+      },
+      {
+        "step": 3,
+        "component": "ModelServer",
+        "action": "Host all 4 base models + meta-learner",
+        "tech": "BentoML or Ray Serve"
+      },
+      {
+        "step": 4,
+        "component": "PredictionOrchestrator",
+        "action": "Trigger per-over inference and compose payload",
+        "tech": "Python + Airflow / Prefect"
+      },
+      {
+        "step": 5,
+        "component": "LLMCaller",
+        "action": "Send structured prompt to Anthropic API, parse JSON response",
+        "tech": "Anthropic Python SDK"
+      },
+      {
+        "step": 6,
+        "component": "OutputAggregator",
+        "action": "Merge ML + LLM outputs into unified prediction object",
+        "tech": "Python FastAPI service"
+      },
+      {
+        "step": 7,
+        "component": "APIGateway",
+        "action": "Expose REST + WebSocket endpoints to consumers",
+        "tech": "FastAPI + Nginx"
+      },
+      {
+        "step": 8,
+        "component": "CacheLayer",
+        "action": "Cache last-known state for low-latency fallback",
+        "tech": "Redis"
+      },
+      {
+        "step": 9,
+        "component": "FantasyIntegration",
+        "action": "Push webhook updates to fantasy platform on each over",
+        "tech": "Webhook dispatcher + retry queue"
+      }
+    ],
+    "latency_sla": {
+      "over_complete_to_feature_pipeline": "< 10s",
+      "feature_pipeline_to_ml_inference": "< 5s",
+      "ml_inference_to_llm_complete": "< 8s",
+      "llm_complete_to_webhook_fired": "< 2s",
+      "end_to_end_target": "< 30s"
+    },
+    "cloud_options": {
+      "preferred": "cloud_agnostic",
+      "gcp": {
+        "stream_ingestion": "Pub/Sub",
+        "feature_store": "Feast on GKE",
+        "model_serving": "Vertex AI + Ray Serve",
+        "orchestration": "Cloud Composer (Airflow)",
+        "database": "BigQuery + Firestore",
+        "cache": "Memorystore (Redis)",
+        "api_layer": "Cloud Run (FastAPI)",
+        "monitoring": "Vertex Model Monitoring"
+      },
+      "aws": {
+        "stream_ingestion": "Kinesis",
+        "feature_store": "Feast on EKS",
+        "model_serving": "SageMaker + Ray Serve",
+        "orchestration": "MWAA (Airflow)",
+        "database": "Redshift + DynamoDB",
+        "cache": "ElastiCache (Redis)",
+        "api_layer": "Lambda + API Gateway",
+        "monitoring": "SageMaker Model Monitor"
+      }
+    }
+  },
+  "api_output_spec": {
+    "base_object": "PredictionPayload",
+    "signals": [
+      {
+        "id": "S1",
+        "name": "win_probability",
+        "type": "float",
+        "range": "0.0-1.0",
+        "description": "Real-time match win probability per team",
+        "refresh": "every_over"
+      },
+      {
+        "id": "S2",
+        "name": "season_winner_probability",
+        "type": "float",
+        "range": "0.0-1.0",
+        "description": "Probability of winning IPL trophy",
+        "refresh": "daily_pre_match"
+      },
+      {
+        "id": "S3",
+        "name": "playoff_qualification_prob",
+        "type": "float",
+        "range": "0.0-1.0",
+        "description": "Probability of reaching playoffs",
+        "refresh": "post_match"
+      },
+      {
+        "id": "S4",
+        "name": "team_leaderboard_rank",
+        "type": "integer",
+        "range": "1-10",
+        "description": "Current season predicted finish rank",
+        "refresh": "post_match"
+      },
+      {
+        "id": "S5",
+        "name": "player_impact_score",
+        "type": "float",
+        "range": "0-100",
+        "description": "Composite in-match contribution index per player",
+        "refresh": "every_over"
+      },
+      {
+        "id": "S6",
+        "name": "fantasy_point_projection",
+        "type": "float",
+        "range": "0-200",
+        "description": "Projected fantasy points for remainder of match",
+        "refresh": "every_over"
+      },
+      {
+        "id": "S7",
+        "name": "momentum_alert",
+        "type": "object",
+        "description": "Fired when win probability shifts >15% in one over",
+        "fields": [
+          "alert_type",
+          "trigger",
+          "delta",
+          "over",
+          "description"
+        ]
+      },
+      {
+        "id": "S8",
+        "name": "llm_narrative",
+        "type": "string",
+        "description": "3-sentence plain English prediction explanation from LLM",
+        "refresh": "every_over"
+      },
+      {
+        "id": "S9",
+        "name": "confidence_tag",
+        "type": "enum",
+        "values": [
+          "HIGH",
+          "MEDIUM",
+          "LOW"
+        ],
+        "description": "Model confidence level with rationale",
+        "refresh": "every_over"
+      },
+      {
+        "id": "S10",
+        "name": "key_risk_flag",
+        "type": "string",
+        "description": "Primary identified threat to current prediction",
+        "refresh": "every_over"
+      },
+      {
+        "id": "S11",
+        "name": "fantasy_captain_pick",
+        "type": "string",
+        "description": "Recommended captain based on projection delta",
+        "refresh": "every_over"
+      }
+    ],
+    "momentum_alert_threshold_pct": 15,
+    "integration_modes": [
+      {
+        "mode": "REST Poll",
+        "protocol": "GET /v1/match/{id}/prediction",
+        "use_case": "Fantasy app polling every over"
+      },
+      {
+        "mode": "WebSocket Push",
+        "protocol": "ws://ipie/live/{match_id}",
+        "use_case": "Real-time dashboard embedding"
+      },
+      {
+        "mode": "Webhook Notify",
+        "protocol": "POST to registered URL on each over",
+        "use_case": "Fantasy platform server-to-server"
+      },
+      {
+        "mode": "Batch Pre-Match",
+        "protocol": "GET /v1/season/predictions",
+        "use_case": "Season-start fantasy league setup"
+      }
+    ],
+    "rate_limits": {
+      "rest_rpm": 60,
+      "websocket_concurrent_matches": 10,
+      "webhook_delivery_sla": "< 30s with 3x retry",
+      "season_endpoint_refresh": "daily at 06:00 IST"
+    }
+  },
+  "evaluation": {
+    "offline_metrics": [
+      {
+        "metric": "match_winner_accuracy",
+        "target": "> 72%",
+        "measured_on": "held_out_IPL_2024"
+      },
+      {
+        "metric": "brier_score",
+        "target": "< 0.18",
+        "measured_on": "all_match_predictions"
+      },
+      {
+        "metric": "log_loss",
+        "target": "< 0.45",
+        "measured_on": "all_match_predictions"
+      },
+      {
+        "metric": "season_winner_top3_accuracy",
+        "target": "> 85%",
+        "measured_on": "season_start_predictions"
+      },
+      {
+        "metric": "playoff_qualifier_accuracy",
+        "target": "> 80%",
+        "measured_on": "post_match_30_predictions"
+      },
+      {
+        "metric": "fantasy_point_projection_mae",
+        "target": "< 12 pts",
+        "measured_on": "per_player_per_match"
+      }
+    ],
+    "online_monitoring": [
+      "Data drift detection via Evidently AI — triggered post-match on all feature distributions",
+      "Prediction confidence calibration curve tracked weekly via MLflow",
+      "Model performance dashboard in Grafana: accuracy, latency, alert fire rate",
+      "Automated alert if match accuracy drops below 65% in any rolling 10-match window",
+      "LLM output quality: secondary LLM judges narrative coherence post-match"
+    ]
+  },
+  "roadmap": [
+    {
+      "phase": 0,
+      "name": "Data Foundation",
+      "timeline": "Weeks 1-3",
+      "scope": "CricSheet ingestion, feature store setup, historical dataset validation",
+      "exit_criteria": "Feature store populated for 2008-2024"
+    },
+    {
+      "phase": 1,
+      "name": "Base Models",
+      "timeline": "Weeks 4-7",
+      "scope": "Train MODEL-A through MODEL-D, offline evaluation on 2024 hold-out",
+      "exit_criteria": "Match accuracy > 68% offline"
+    },
+    {
+      "phase": 2,
+      "name": "Meta-Learner",
+      "timeline": "Weeks 8-9",
+      "scope": "Stacking layer, calibration, Brier score validation",
+      "exit_criteria": "Brier < 0.18 on validation set"
+    },
+    {
+      "phase": 3,
+      "name": "LLM Layer",
+      "timeline": "Weeks 10-11",
+      "scope": "Prompt engineering, structured JSON output, narrative QA",
+      "exit_criteria": "Coherence score > 4.0/5.0 human eval"
+    },
+    {
+      "phase": 4,
+      "name": "Live Pipeline",
+      "timeline": "Weeks 12-14",
+      "scope": "Live API integration, per-over trigger, latency testing",
+      "exit_criteria": "End-to-end < 30s on test match simulation"
+    },
+    {
+      "phase": 5,
+      "name": "Fantasy API",
+      "timeline": "Weeks 15-16",
+      "scope": "REST + WebSocket + webhook delivery, fantasy UX integration",
+      "exit_criteria": "All 11 signals delivered per over"
+    },
+    {
+      "phase": 6,
+      "name": "Live Season",
+      "timeline": "IPL 2026",
+      "scope": "Production deployment, monitoring, online fine-tuning",
+      "exit_criteria": "Season accuracy > 72% maintained"
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1",
+      "risk": "Live data API downtime (Cricbuzz / IPL feed)",
+      "likelihood": "MEDIUM",
+      "impact": "HIGH",
+      "mitigation": "Multi-source fallback: if primary fails, secondary activates within 10s"
+    },
+    {
+      "id": "R2",
+      "risk": "LLM latency spike (Anthropic API)",
+      "likelihood": "LOW",
+      "impact": "MEDIUM",
+      "mitigation": "30s timeout; if exceeded, serve ML output only with confidence_tag=SYSTEM_FALLBACK"
+    },
+    {
+      "id": "R3",
+      "risk": "Model drift mid-season (new players, foreign conditions)",
+      "likelihood": "MEDIUM",
+      "impact": "MEDIUM",
+      "mitigation": "Online fine-tuning pipeline + inference-time feature override"
+    },
+    {
+      "id": "R4",
+      "risk": "Data leakage in feature construction",
+      "likelihood": "LOW",
+      "impact": "HIGH",
+      "mitigation": "Point-in-time feature store with strict cutoff enforcement + leakage unit tests"
+    },
+    {
+      "id": "R5",
+      "risk": "Fantasy platform webhook overload during finals",
+      "likelihood": "LOW",
+      "impact": "HIGH",
+      "mitigation": "Queue-backed delivery with Redis buffer; horizontal scaling on Cloud Run"
+    },
+    {
+      "id": "R6",
+      "risk": "IPL data licensing or scraping legal risk",
+      "likelihood": "MEDIUM",
+      "impact": "HIGH",
+      "mitigation": "Prioritise official IPL feed; restrict scraping to publicly available aggregators"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "OQ1",
+      "question": "Can we source real-time pitch condition data from broadcast APIs, or rely solely on historical venue profiles?"
+    },
+    {
+      "id": "OQ2",
+      "question": "Will the official IPL feed provide injury/availability updates reliably enough as a hard feature, or only as a soft signal?"
+    },
+    {
+      "id": "OQ3",
+      "question": "At scale (74 matches × 40 overs × 2 LLM calls/over), Anthropic API costs need profiling — consider Haiku for low-stakes overs.",
+      "resolution": "RESOLVED: ~$16.78/season at 74 matches with 30% low-stakes skip rate. Cost is acceptable. See artifacts/llm_cost_estimate.json."
+    },
+    {
+      "id": "OQ4",
+      "question": "Will fantasy platform partner share user team composition data for personalised prediction context in v2.0?"
+    },
+    {
+      "id": "OQ5",
+      "question": "Cloud provider final selection: cost modelling for GCP vs AWS vs hybrid needed before Phase 0 infra setup."
+    }
+  ]
+}

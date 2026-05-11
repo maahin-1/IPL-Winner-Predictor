@@ -34,12 +34,16 @@ HYPERPARAMS = {
 INPUT_FEATURES = [
     "current_score",
     "wickets_fallen",
+    "wickets_remaining",
     "run_rate_required",
+    "run_rate_differential",
+    "balls_remaining",
     "over_number",
     "bowling_phase",
     "batsman_at_crease_features",
     "bowler_current_form",
     "matchup_h2h",
+    "team1_is_chasing",
 ]
 
 
@@ -50,15 +54,27 @@ class ModelB_InMatchLGB(BaseEstimator, ClassifierMixin):
         self.hyperparams = hyperparams or HYPERPARAMS
         self._model: Optional[lgb.LGBMClassifier] = None
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "ModelB_InMatchLGB":
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        sample_weight=None,
+        X_val: Optional[pd.DataFrame] = None,
+        y_val: Optional[pd.Series] = None,
+    ) -> "ModelB_InMatchLGB":
         self._validate_features(X)
         self._model = lgb.LGBMClassifier(**self.hyperparams)
-        self._model.fit(
-            X[INPUT_FEATURES],
-            y,
-            eval_set=[(X[INPUT_FEATURES], y)],
-            callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(False)],
-        )
+        if X_val is not None and y_val is not None:
+            self._validate_features(X_val)
+            self._model.fit(
+                X[INPUT_FEATURES],
+                y,
+                sample_weight=sample_weight,
+                eval_set=[(X_val[INPUT_FEATURES], y_val)],
+                callbacks=[lgb.early_stopping(50, verbose=False), lgb.log_evaluation(False)],
+            )
+        else:
+            self._model.fit(X[INPUT_FEATURES], y, sample_weight=sample_weight)
         logger.info("MODEL-B trained on %d samples", len(X))
         return self
 

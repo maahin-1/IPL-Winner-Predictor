@@ -15,6 +15,22 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Canonical team names — map all historical/renamed variants to one name
+TEAM_NAME_MAP = {
+    # Delhi
+    "Delhi Daredevils": "Delhi Capitals",
+    # Punjab
+    "Kings XI Punjab": "Punjab Kings",
+    # Bangalore/Bengaluru
+    "Royal Challengers Bangalore": "Royal Challengers Bengaluru",
+    # Pune (typo variant)
+    "Rising Pune Supergiant": "Rising Pune Supergiants",
+}
+
+def normalize_team(name: str) -> str:
+    return TEAM_NAME_MAP.get(name, name)
+
+
 PARQUET_SCHEMA = pa.schema([
     pa.field("match_id", pa.string()),
     pa.field("season", pa.int32()),
@@ -56,10 +72,12 @@ def _extract_match_meta(info: dict, match_id: str) -> dict:
     }
     teams = info.get("teams", [])
     if len(teams) >= 2:
-        meta["team1"] = teams[0]
-        meta["team2"] = teams[1]
+        meta["team1"] = normalize_team(teams[0])
+        meta["team2"] = normalize_team(teams[1])
     outcomes = info.get("outcome", {})
-    meta["winner"] = outcomes.get("winner", outcomes.get("result", "no_result"))
+    raw_winner = outcomes.get("winner", outcomes.get("result", "no_result"))
+    meta["winner"] = normalize_team(raw_winner)
+    meta["toss_winner"] = normalize_team(meta["toss_winner"])
     dates = info.get("dates", [])
     if dates:
         meta["date"] = pd.to_datetime(dates[0]).date()
@@ -71,12 +89,22 @@ def _parse_delivery(delivery: dict, over: int, ball_num: int) -> dict:
     bowler = delivery.get("bowler", "")
     non_striker = delivery.get("non_striker", "")
     runs = delivery.get("runs", {})
+    # runs key differs: old format uses "batsman", new uses "batter"
+    runs_batter = int(runs.get("batter", runs.get("batsman", 0)))
     wickets = delivery.get("wickets", [])
+    # old format: wicket is a single dict under "wicket" key
+    if not wickets and "wicket" in delivery:
+        w = delivery["wicket"]
+        wickets = [w] if isinstance(w, dict) else []
     wicket = len(wickets) > 0
     wicket_kind = wickets[0].get("kind", "") if wicket else ""
     player_out = wickets[0].get("player_out", "") if wicket else ""
     fielders = wickets[0].get("fielders", []) if wicket else []
-    fielder = fielders[0].get("name", "") if fielders else ""
+    if fielders:
+        f0 = fielders[0]
+        fielder = f0.get("name", "") if isinstance(f0, dict) else str(f0)
+    else:
+        fielder = ""
 
     return {
         "over": over,
@@ -84,7 +112,7 @@ def _parse_delivery(delivery: dict, over: int, ball_num: int) -> dict:
         "batsman": batsman,
         "non_striker": non_striker,
         "bowler": bowler,
-        "runs_batter": int(runs.get("batter", 0)),
+        "runs_batter": runs_batter,
         "runs_extras": int(runs.get("extras", 0)),
         "runs_total": int(runs.get("total", 0)),
         "wicket": wicket,
@@ -94,22 +122,65 @@ def _parse_delivery(delivery: dict, over: int, ball_num: int) -> dict:
     }
 
 
+def _parse_innings_old(innings_data: dict, innings_idx: int, meta: dict) -> list[dict]:
+    """Old CricSheet format: deliveries list with over.ball keys like '0.1', '1.3'."""
+    records = []
+    for delivery_entry in innings_data.get("deliveries", []):
+        for over_ball_str, delivery in delivery_entry.items():
+            try:
+                parts = str(over_ball_str).split(".")
+                over_num = int(parts[0])
+                ball_num = int(parts[1]) if len(parts) > 1 else 1
+            except (ValueError, IndexError):
+                continue
+            row = {**meta, "innings": innings_idx}
+            row.update(_parse_delivery(delivery, over_num, ball_num))
+            row["timestamp"] = pd.Timestamp(meta["date"]) if meta["date"] else pd.NaT
+            records.append(row)
+    return records
+
+
+def _parse_innings_new(innings_data: dict, innings_idx: int, meta: dict) -> list[dict]:
+    """New CricSheet format: overs list with deliveries sub-list."""
+    records = []
+    for over_data in innings_data.get("overs", []):
+        over_num = int(over_data.get("over", 0))
+        for ball_idx, delivery in enumerate(over_data.get("deliveries", []), start=1):
+            row = {**meta, "innings": innings_idx}
+            row.update(_parse_delivery(delivery, over_num, ball_idx))
+            row["timestamp"] = pd.Timestamp(meta["date"]) if meta["date"] else pd.NaT
+            records.append(row)
+    return records
+
+
 def parse_yaml_to_records(yaml_path: Path) -> list[dict]:
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     match_id = yaml_path.stem
-    meta = _extract_match_meta(data.get("info", {}), match_id)
+    info = data.get("info", {})
+
+    # Derive season from dates if not present
+    if "season" not in info:
+        dates = info.get("dates", [])
+        if dates:
+            info["season"] = pd.to_datetime(dates[0]).year
+
+    meta = _extract_match_meta(info, match_id)
     records = []
 
-    for innings_idx, innings in enumerate(data.get("innings", []), start=1):
-        for over_data in innings.get("overs", []):
-            over_num = int(over_data.get("over", 0))
-            for ball_idx, delivery in enumerate(over_data.get("deliveries", []), start=1):
-                row = {**meta, "innings": innings_idx}
-                row.update(_parse_delivery(delivery, over_num, ball_idx))
-                row["timestamp"] = pd.Timestamp(meta["date"]) if meta["date"] else pd.NaT
-                records.append(row)
+    for innings_idx, innings_entry in enumerate(data.get("innings", []), start=1):
+        # Old format: {"1st innings": {...}} or {"2nd innings": {...}}
+        if isinstance(innings_entry, dict):
+            # Check for old format key like "1st innings"
+            innings_keys = [k for k in innings_entry if "innings" in str(k).lower()]
+            if innings_keys:
+                innings_data = innings_entry[innings_keys[0]]
+                records.extend(_parse_innings_old(innings_data, innings_idx, meta))
+            elif "overs" in innings_entry:
+                records.extend(_parse_innings_new(innings_entry, innings_idx, meta))
+            elif "deliveries" in innings_entry:
+                records.extend(_parse_innings_old(innings_entry, innings_idx, meta))
 
     return records
 

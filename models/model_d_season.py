@@ -18,9 +18,10 @@ from sklearn.base import BaseEstimator
 logger = logging.getLogger(__name__)
 
 HYPERPARAMS = {
-    "n_estimators": 500,
-    "num_leaves": 31,
+    "n_estimators": 60,
+    "num_leaves": 7,
     "learning_rate": 0.05,
+    "min_child_samples": 4,
     "feature_fraction": 0.8,
     "bagging_fraction": 0.8,
     "bagging_freq": 5,
@@ -53,16 +54,19 @@ class ModelD_SeasonTrajLGB(BaseEstimator):
         X: pd.DataFrame,
         y_winner: pd.Series,
         y_playoff: pd.Series,
+        sample_weight=None,
     ) -> "ModelD_SeasonTrajLGB":
         self._validate_features(X)
         self._model_winner = lgb.LGBMClassifier(**self.hyperparams)
         self._model_winner.fit(
             X[INPUT_FEATURES], y_winner,
+            sample_weight=sample_weight,
             callbacks=[lgb.log_evaluation(False)],
         )
         self._model_playoff = lgb.LGBMClassifier(**self.hyperparams)
         self._model_playoff.fit(
             X[INPUT_FEATURES], y_playoff,
+            sample_weight=sample_weight,
             callbacks=[lgb.log_evaluation(False)],
         )
         logger.info("MODEL-D trained on %d samples", len(X))

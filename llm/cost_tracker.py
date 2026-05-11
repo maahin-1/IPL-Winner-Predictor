@@ -1,7 +1,7 @@
 """
 LLM API cost tracker — per-match and season simulation.
 Addresses OQ3: at scale (74 matches × 40 overs × 2 LLM calls/over),
-Anthropic API costs need profiling.
+OpenRouter free-tier model pricing.
 """
 from __future__ import annotations
 
@@ -13,9 +13,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# claude-sonnet-4-20250514 pricing (USD per million tokens) — verify against current Anthropic pricing
-INPUT_COST_PER_M = 3.0
-OUTPUT_COST_PER_M = 15.0
+# google/gemma-3-27b-it:free via OpenRouter — $0/M tokens (free tier).
+# Set non-zero if switching to paid model.
+INPUT_COST_PER_M = 0.0
+OUTPUT_COST_PER_M = 0.0
 
 AVG_INPUT_TOKENS_PER_CALL = 600
 AVG_OUTPUT_TOKENS_PER_CALL = 150

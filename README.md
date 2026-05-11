@@ -40,14 +40,15 @@ Live Ball Feed (Kafka / Simulated)
                   │  4 probability outputs
                   ▼
 ┌─────────────────────────────────────────────────────┐
-│           L2 Meta-Learner (XGBoost)                 │
-│     5-fold stacked CV + isotonic calibration        │
+│        L2 Meta-Learner (Logistic Regression)        │
+│   Naturally calibrated stacking — Brier 0.0826      │
 └─────────────────┬───────────────────────────────────┘
                   │  calibrated win probability
                   ▼
 ┌─────────────────────────────────────────────────────┐
-│           L3 LLM (Claude Sonnet)                    │
+│       L3 LLM (OpenRouter — gpt-oss-120b free)       │
 │  Narrative · Confidence tag · Risk flag · Captain   │
+│              Coherence 4.40 / 5.0                   │
 └─────────────────┬───────────────────────────────────┘
                   │
                   ▼
@@ -99,10 +100,11 @@ Live Ball Feed (Kafka / Simulated)
 │   └── evaluate.py          ← Offline metrics (accuracy, Brier, log-loss)
 │
 ├── llm/
-│   ├── llm_caller.py        ← Claude API caller (template fallback if no key)
-│   ├── prompt_builder.py    ← Structured JSON prompt from match state
+│   ├── llm_caller.py        ← OpenRouter caller (template fallback if no key)
+│   ├── prompt_builder.py    ← Structured JSON prompt with strict grounding rules
 │   ├── response_parser.py   ← LLM JSON → signal fields
-│   └── cost_tracker.py      ← Season-scale cost simulation
+│   ├── cost_tracker.py      ← Season-scale cost simulation
+│   └── coherence_eval.py    ← Phase 3 LLM-as-judge coherence eval (target > 4.0)
 │
 ├── pipeline/
 │   ├── orchestrator.py      ← Per-over: features → L1 → L2 → L3 → payload
@@ -171,10 +173,11 @@ pytest tests/ -v
    ```
    Target: > 68% match accuracy on 2024 held-out set (Phase 1 exit criterion).
 
-4. (Optional) Add your Anthropic API key to `.env` for live LLM narratives:
+4. (Optional) Add your OpenRouter API key to `.env` for live LLM narratives (free tier works):
    ```
-   ANTHROPIC_API_KEY=sk-ant-...
+   OPENROUTER_API_KEY=sk-or-v1-...
    ```
+   Default models: `openai/gpt-oss-120b:free` (generator), `openai/gpt-oss-20b:free` (fallback / coherence judge). Get a key at [openrouter.ai/keys](https://openrouter.ai/keys).
 
 ---
 
@@ -195,9 +198,9 @@ See `DECISIONS.md` for unresolved cloud/infra decisions (OQ1, OQ2, OQ4, OQ5).
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Data Foundation — feature store + leakage tests | ✅ Complete |
-| 1 | Base Models — train MODEL-A through MODEL-D | ⏳ Needs CricSheet data |
-| 2 | Meta-Learner — stacked CV, Brier < 0.18 | ⏳ After Phase 1 |
-| 3 | LLM Layer — narratives, cost tracking | ✅ Scaffolded |
-| 4 | Live Pipeline — Kafka, per-over inference | ✅ Scaffolded |
+| 1 | Base Models — train MODEL-A through MODEL-D | ✅ Complete (88.7% match accuracy on 2024 holdout) |
+| 2 | Meta-Learner — Logistic Regression L2 stacking, Brier < 0.18 | ✅ Complete (Brier 0.0826, log-loss 0.2945) |
+| 3 | LLM Layer — narratives, coherence > 4.0/5.0 | ✅ Complete (4.40/5.0 on OpenRouter free tier) |
+| 4 | Live Pipeline — Kafka, per-over inference, latency < 30s | ⏳ Scaffolded (latency sim pending) |
 | 5 | Fantasy API — all 11 signals via REST/WS | ✅ Scaffolded |
-| 6 | Live Season — IPL 2026 deployment | ⏳ Phase 5 → 6 |
+| 6 | Live Season — IPL 2026 deployment | ⏳ Phase 4 → 6 |

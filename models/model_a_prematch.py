@@ -19,11 +19,15 @@ from sklearn.calibration import CalibratedClassifierCV
 logger = logging.getLogger(__name__)
 
 HYPERPARAMS = {
-    "n_estimators": 800,
-    "max_depth": 6,
+    "n_estimators": 200,
+    "max_depth": 3,
     "learning_rate": 0.05,
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
+    "subsample": 0.75,
+    "colsample_bytree": 0.75,
+    "min_child_weight": 5,
+    "reg_lambda": 2.0,
+    "reg_alpha": 0.3,
+    "gamma": 0.5,
     "objective": "binary:logistic",
     "eval_metric": "logloss",
     "random_state": 42,
@@ -35,9 +39,14 @@ INPUT_FEATURES = [
     "venue_history",
     "h2h_record",
     "team_form_last_5",
-    "coach_win_rate",
-    "toss_outcome",
-    "season_trajectory",
+    "team_form_last_10",
+    "opponent_form_last_10",
+    "toss_win_pct",
+    "venue_away_record",
+    "win_streak",
+    "current_season_win_rate",
+    "focal_won_toss",
+    "focal_is_chasing",
 ]
 
 
@@ -48,12 +57,13 @@ class ModelA_PreMatchXGB(BaseEstimator, ClassifierMixin):
         self.hyperparams = hyperparams or HYPERPARAMS
         self._model: Optional[xgb.XGBClassifier] = None
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "ModelA_PreMatchXGB":
+    def fit(self, X: pd.DataFrame, y: pd.Series, sample_weight=None) -> "ModelA_PreMatchXGB":
         self._validate_features(X)
         self._model = xgb.XGBClassifier(**self.hyperparams)
         self._model.fit(
             X[INPUT_FEATURES],
             y,
+            sample_weight=sample_weight,
             eval_set=[(X[INPUT_FEATURES], y)],
             verbose=False,
         )

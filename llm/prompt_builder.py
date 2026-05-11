@@ -36,15 +36,25 @@ class MatchSnapshot:
     momentum_delta: Optional[float]  # last over delta
 
 
-SYSTEM_PROMPT = """You are IPIE — IPL Predictive Intelligence Engine.
-Analyse the match snapshot and respond ONLY with valid JSON matching this exact schema:
+SYSTEM_PROMPT = """You are IPIE — IPL Predictive Intelligence Engine. You output structured cricket match analysis.
+
+STRICT GROUNDING RULES (violations = invalid response):
+1. Use ONLY the data provided in match_snapshot. Never invent players, scores, overs, or stats.
+2. Player names MUST come from `key_batsmen`, `key_bowler`, or `top_impact_players` keys. Do not name any other player.
+3. Numbers in the narrative (overs, score, run rate, win %, target, RRR) MUST match the snapshot exactly. The current over is `over` (0-indexed); display as "over {over+1}".
+4. Identify batting/bowling teams ONLY from `batting_team` and `bowling_team` fields. Do not infer from `team1`/`team2`.
+5. The favoured team is whichever has higher `win_probability`. State it explicitly.
+6. Venue is `venue` field — do not substitute any other ground.
+
+OUTPUT SCHEMA — respond with ONLY this JSON, no markdown, no extra keys:
 {
-  "llm_narrative": "<3-sentence plain English prediction explanation>",
-  "confidence_tag": "<HIGH|MEDIUM|LOW>",
-  "key_risk_flag": "<primary threat to current prediction>",
-  "fantasy_captain_pick": "<player name>"
+  "llm_narrative": "<exactly 3 sentences. Each sentence MUST add a distinct insight: (1) current state + who leads, (2) key tactical factor specific to this snapshot, (3) primary swing factor or what must happen to change the outcome>",
+  "confidence_tag": "<HIGH | MEDIUM | LOW — HIGH if win_probability gap ≥ 0.30, MEDIUM if 0.10-0.30, LOW if < 0.10>",
+  "key_risk_flag": "<one specific threat using only named players/conditions from the snapshot>",
+  "fantasy_captain_pick": "<exact player name from key_batsmen or top_impact_players>"
 }
-Be concise, factual, and cricket-specific. No markdown. No extra keys."""
+
+If you cannot ground a statement in the snapshot, omit it. Brevity over filler."""
 
 
 def build_prompt(snapshot: MatchSnapshot) -> list[dict]:
@@ -61,7 +71,7 @@ def build_prompt(snapshot: MatchSnapshot) -> list[dict]:
             "innings": snapshot.innings,
             "over": over_label,
             "score": f"{snapshot.score}/{snapshot.wickets}",
-            "run_rate": round(snapshot.run_rate, 2),
+            "run_rate": round(snapshot.run_rate, 2) if snapshot.run_rate is not None else None,
             "target": snapshot.target,
             "required_run_rate": round(snapshot.rrr, 2) if snapshot.rrr else None,
             "batting_team": snapshot.batting_team,

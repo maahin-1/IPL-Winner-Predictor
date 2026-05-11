@@ -67,3 +67,14 @@ data/feast/online_store.db
 # Logs
 *.log
 logs/
+
+# Claude Code / agent metadata
+.claude/
+
+# Graphify outputs (knowledge graph artifacts)
+.graphify_*
+graphify-out/
+
+# Caveman mode backups
+*.original.md
+

@@ -57,6 +57,8 @@ class PredictionPayload:
     # S11
     fantasy_captain_pick: str
     latency_ms: float
+    # Per-stage SLA timings (ms) — keys match prd.system_architecture.latency_sla
+    stage_timings_ms: dict[str, float] = None
 
 
 class PredictionOrchestrator:
@@ -91,11 +93,14 @@ class PredictionOrchestrator:
         """
         t0 = time.monotonic()
 
-        # ── L1: Base model inference (budget: 80ms) ──────────────────────────
+        # ── Stage 1: feature pipeline assembly (SLA: < 10s) ──────────────────
         pre_features = pd.DataFrame([feature_vectors.get("prematch", {})])
         live_features = pd.DataFrame([feature_vectors.get("live", {})])
         player_features = pd.DataFrame([feature_vectors.get("player", {})])
         season_features = pd.DataFrame([feature_vectors.get("season", {})])
+        t_features = time.monotonic()
+
+        # ── L1: Base model inference (budget: 80ms) ──────────────────────────
 
         try:
             a_prob = self._model_a.predict_win_probability(pre_features)
@@ -131,6 +136,7 @@ class PredictionOrchestrator:
             calibrated_prob = self._meta.predict_calibrated_win_probability(meta_features)
         except Exception:
             calibrated_prob = b_prob
+        t_ml = time.monotonic()
 
         team1 = match_state.team1
         team2 = match_state.team2
@@ -168,13 +174,23 @@ class PredictionOrchestrator:
             momentum_delta=delta if delta != 0 else None,
         )
         llm_out: LLMOutput = self._llm.call_for_over(snapshot)
+        t_llm = time.monotonic()
 
-        latency_ms = (time.monotonic() - t0) * 1000
+        latency_ms = (t_llm - t0) * 1000
         if latency_ms > LATENCY_BUDGET_MS:
             logger.warning(
                 "End-to-end latency %.0fms exceeded 30s SLA for match %s over %d",
                 latency_ms, match_state.match_id, match_state.over,
             )
+
+        stage_timings_ms = {
+            "over_complete_to_feature_pipeline": round((t_features - t0) * 1000, 2),
+            "feature_pipeline_to_ml_inference":  round((t_ml - t_features) * 1000, 2),
+            "ml_inference_to_llm_complete":      round((t_llm - t_ml) * 1000, 2),
+            # llm_complete_to_webhook_fired filled by caller after webhook.dispatch
+            "llm_complete_to_webhook_fired":     0.0,
+            "end_to_end_target":                 round(latency_ms, 2),
+        }
 
         return PredictionPayload(
             match_id=match_state.match_id,
@@ -197,6 +213,7 @@ class PredictionOrchestrator:
             key_risk_flag=llm_out.key_risk_flag,
             fantasy_captain_pick=llm_out.fantasy_captain_pick,
             latency_ms=round(latency_ms, 1),
+            stage_timings_ms=stage_timings_ms,
         )
 
 

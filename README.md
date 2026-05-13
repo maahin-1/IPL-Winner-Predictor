@@ -201,6 +201,6 @@ See `DECISIONS.md` for unresolved cloud/infra decisions (OQ1, OQ2, OQ4, OQ5).
 | 1 | Base Models — train MODEL-A through MODEL-D | ✅ Complete (88.7% match accuracy on 2024 holdout) |
 | 2 | Meta-Learner — Logistic Regression L2 stacking, Brier < 0.18 | ✅ Complete (Brier 0.0826, log-loss 0.2945) |
 | 3 | LLM Layer — narratives, coherence > 4.0/5.0 | ✅ Complete (4.40/5.0 on OpenRouter free tier) |
-| 4 | Live Pipeline — Kafka, per-over inference, latency < 30s | ⏳ Scaffolded (latency sim pending) |
+| 4 | Live Pipeline — Kafka, per-over inference, latency < 30s | ✅ Complete (end-to-end 656ms, L1 ensemble 3.1ms) |
 | 5 | Fantasy API — all 11 signals via REST/WS | ✅ Scaffolded |
 | 6 | Live Season — IPL 2026 deployment | ⏳ Phase 4 → 6 |

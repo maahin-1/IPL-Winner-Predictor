@@ -22,9 +22,9 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-PRIMARY_MODEL = "openai/gpt-oss-120b:free"
+PRIMARY_MODEL = "meta-llama/llama-3.2-3b-instruct:free"  # 3B, no reasoning tokens, ~1-2s
 FALLBACK_MODEL = "openai/gpt-oss-20b:free"
-TIMEOUT_S = 30
+TIMEOUT_S = 8                                            # L3 budget per prd.system_architecture.latency_sla
 MAX_TOKENS = 400
 MAX_CALLS_PER_OVER = 2
 
@@ -103,6 +103,7 @@ class LLMCaller:
                     base_url=OPENROUTER_BASE_URL,
                     api_key=self._api_key,
                     timeout=TIMEOUT_S,
+                    max_retries=0,  # SLA budget is tight — no SDK-level retries
                 )
             except ImportError:
                 logger.warning("openai package not installed — using template narratives")
@@ -124,30 +125,27 @@ class LLMCaller:
         messages = build_prompt(snapshot)
         chat_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
-        for model_id in (self._model, self._fallback_model):
-            try:
-                response = self._client.chat.completions.create(
-                    model=model_id,
-                    max_tokens=MAX_TOKENS,
-                    messages=chat_messages,
-                )
-                raw_text = response.choices[0].message.content or ""
-                output = parse_llm_response(raw_text)
-                logger.info(
-                    "LLM call succeeded (%s) for match %s over %d",
-                    model_id, snapshot.match_id, snapshot.over,
-                )
-                return output
-
-            except Exception as e:
-                logger.warning(
-                    "LLM call failed on %s for match %s over %d: %s",
-                    model_id, snapshot.match_id, snapshot.over, e,
-                )
-                continue
-
-        logger.error("All OpenRouter models failed for match %s — R2 fallback", snapshot.match_id)
-        return FALLBACK_OUTPUT
+        # Single attempt with primary model — L3 SLA is 8s, cannot afford fallback latency
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                max_tokens=MAX_TOKENS,
+                messages=chat_messages,
+                temperature=0.2,
+            )
+            raw_text = response.choices[0].message.content or ""
+            output = parse_llm_response(raw_text)
+            logger.info(
+                "LLM call succeeded (%s) for match %s over %d",
+                self._model, snapshot.match_id, snapshot.over,
+            )
+            return output
+        except Exception as e:
+            logger.warning(
+                "LLM call failed (%s) for match %s over %d: %s — R2 fallback",
+                self._model, snapshot.match_id, snapshot.over, e,
+            )
+            return FALLBACK_OUTPUT
 
     def _check_call_budget(self, over: int) -> bool:
         if over != self._current_over:
